@@ -7,6 +7,19 @@ cfg = load_config()
 
 FX_RATES = {"GBP": 1.0, "USD": 0.79, "EUR": 0.86}
 
+def amount_matches(a, b):
+    return a == b
+
+def date_matches(d1, d2, tolerance_days=0):
+    if pd.isna(d1) or pd.isna(d2):
+        return False
+    return abs((d1 - d2).days) <= tolerance_days
+
+def reference_matches(r1, r2):
+    if not r1 or not r2:
+        return False
+    return r1 == r2
+
 def normalise_reference(x):
     if pd.isna(x):
         return ""
@@ -90,3 +103,4 @@ def apply_matching(bank_df, ledger_df, gateway_df):
         master[master["final_status"]=="FuzzyMatched"],
         master[master["final_status"]=="Unmatched"]
     )
+
