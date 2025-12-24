@@ -54,14 +54,14 @@ def prepare_dataframe(df):
     else:
         df["amount"] = 0.0
 
-    # Debit / Credit detection (NEW)
+    # Debit / Credit detection
     if df["amount"].mean() < 0:
         df["polarity"] = "debit"
         df["amount"] = df["amount"].abs()
     else:
         df["polarity"] = "credit"
 
-    # Currency conversion (NEW)
+    # Currency conversion
     if "currency" not in df.columns:
         df["currency"] = "GBP"
     df["amount_gbp"] = df.apply(
@@ -86,37 +86,67 @@ def make_match_key(df):
     return df
 
 def apply_matching(bank_df, ledger_df, gateway_df):
-    bank_df = bank_df.copy(); bank_df["source"] = "bank"
-    ledger_df = ledger_df.copy(); ledger_df["source"] = "ledger"
-    gateway_df = gateway_df.copy(); gateway_df["source"] = "gateway"
+    bank_df = bank_df.copy(); bank_df["source"] = "Bank"
+    ledger_df = ledger_df.copy(); ledger_df["source"] = "Ledger"
+    gateway_df = gateway_df.copy(); gateway_df["source"] = "Gateway"
 
     master = pd.concat([bank_df, ledger_df, gateway_df], ignore_index=True)
     master = prepare_dataframe(master)
-    master = make_match_key(master)
 
-    grouped = master.groupby("match_key")["source"].apply(set).reset_index()
-    reconciled_keys = set(
-        grouped[grouped["source"].apply(lambda x: x == {"bank","ledger","gateway"})]["match_key"]
+    # --- Self-join on amount to find candidate matches ---
+    candidates = master.merge(
+        master,
+        on="amount_cent",
+        suffixes=("", "_other")
     )
 
-    master["final_status"] = "Unmatched"
-    master.loc[master["match_key"].isin(reconciled_keys), "final_status"] = "Matched"
+    # Remove self matches
+    candidates = candidates[candidates.index != candidates.index_other]
 
-    master = mark_fuzzy(master)
-    master.loc[master["final_status"]=="Matched", "fuzzy_status"] = "NotFuzzy"
+    # Only cross-source comparisons
+    candidates = candidates[candidates["source"] != candidates["source_other"]]
 
-    master["final_status"] = master.apply(
-        lambda r: "Matched" if r["final_status"]=="Matched"
-        else "FuzzyMatched" if r.get("fuzzy_status")=="FuzzyMatched"
-        else "Unmatched",
+    def row_reason(row):
+        amount_ok = True  # Same amount_cent by construction
+        date_ok = date_matches(row["date"], row["date_other"])
+        ref_ok = reference_matches(row["ref_norm"], row["ref_norm_other"])
+
+        return classify_match(amount_ok, date_ok, ref_ok)
+
+    classified = candidates.apply(
+        lambda r: pd.Series(row_reason(r), index=["final_status", "reason"]),
         axis=1
     )
+
+    candidates = pd.concat([candidates, classified], axis=1)
+
+    # Best result per row (prefer strongest match)
+    priority = {
+        "Matched": 3,
+        "Partially Matched": 2,
+        "Unmatched": 1
+    }
+
+    candidates["priority"] = candidates["final_status"].map(priority)
+
+    best = (
+        candidates.sort_values("priority", ascending=False)
+        .groupby(candidates.index)
+        .first()
+    )
+
+    master["final_status"] = best["final_status"]
+    master["reason"] = best["reason"]
+
+    master["final_status"].fillna("Unmatched", inplace=True)
+    master["reason"].fillna("Exception – No Match Found", inplace=True)
 
     return (
         master,
         master[master["final_status"]=="Matched"],
-        master[master["final_status"]=="FuzzyMatched"],
+        master[master["final_status"]=="Partially Matched"],
         master[master["final_status"]=="Unmatched"]
     )
+
 
 
