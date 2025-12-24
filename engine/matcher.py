@@ -26,6 +26,21 @@ def normalise_reference(x):
     s = str(x).lower()
     return "".join(ch for ch in s if ch.isalnum())
 
+def classify_match(amount_ok, date_ok, ref_ok):
+    if amount_ok and date_ok and ref_ok:
+        return "Matched", "Exact Date/Amount/Ref Match"
+
+    if amount_ok and date_ok:
+        return "Partially Matched", "Exact Amount/Date Match"
+
+    if amount_ok and ref_ok:
+        return "Partially Matched", "Exact Amount/Ref Match"
+
+    if ref_ok:
+        return "Partially Matched", "Partial Ref Match"
+
+    return "Unmatched", "Exception – Amount/Ref"
+
 def prepare_dataframe(df):
     df = df.copy()
 
@@ -103,4 +118,5 @@ def apply_matching(bank_df, ledger_df, gateway_df):
         master[master["final_status"]=="FuzzyMatched"],
         master[master["final_status"]=="Unmatched"]
     )
+
 
