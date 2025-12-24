@@ -255,17 +255,11 @@ def _write_transaction_table(
     # Data rows
     for r_idx, row in enumerate(visible.itertuples(index=False), start=data_start):
         for c_idx, value in enumerate(row, start=start_col):
-
-            # 🔑 HARD FIX: convert pandas Timestamp → date
-            if isinstance(value, Timestamp):
-                value = value.date()
-
             cell = ws.cell(r_idx, c_idx, value)
             cell.border = THIN_BORDER
 
             if date_col_idx and c_idx == date_col_idx:
                 cell.alignment = Alignment(horizontal="center")
-                cell.number_format = "yyyy-mm-dd"
 
     _apply_zebra_rows(ws, data_start, data_end, start_col, end_col)
 
@@ -410,6 +404,4 @@ def write_styled_workbook(
     wb.save(out_path)
     logging.info(f"Excel written to {out_path}")
 
-
     return out_path
-
