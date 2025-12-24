@@ -261,6 +261,9 @@ def _write_transaction_table(
             if date_col_idx and c_idx == date_col_idx:
                 cell.alignment = Alignment(horizontal="center")
 
+            if date_col_idx and c_idx == date_col_idx and value:
+                cell.number_format = "yyyy-mm-dd"
+
     _apply_zebra_rows(ws, data_start, data_end, start_col, end_col)
 
     if "Status" in visible.columns:
@@ -405,3 +408,4 @@ def write_styled_workbook(
     logging.info(f"Excel written to {out_path}")
 
     return out_path
+
