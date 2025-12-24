@@ -139,7 +139,12 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     master["reason"] = best["reason"]
 
     master["final_status"].fillna("Unmatched", inplace=True)
-    master["reason"].fillna("Exception – No Match Found", inplace=True)
+    master["reason"] = master["final_status"].map({
+        "Matched": "Exact Date/Amount/Ref Match",
+        "FuzzyMatched": "Partial Ref / Date / Amount Match",
+        "Unmatched": "Exception – No Match Found",
+    })
+
 
     return (
         master,
@@ -147,6 +152,3 @@ def apply_matching(bank_df, ledger_df, gateway_df):
         master[master["final_status"]=="Partially Matched"],
         master[master["final_status"]=="Unmatched"]
     )
-
-
-
