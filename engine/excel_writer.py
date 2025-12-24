@@ -31,6 +31,7 @@ INTERNAL_COLUMNS = {
 # User-facing column renames
 COLUMN_RENAMES = {
     "final_status": "Status",
+    "reason": "Reason",
     "source": "Source",
     "date": "Date",
     "amount": "Amount (£)",
@@ -402,5 +403,6 @@ def write_styled_workbook(
 
     wb.save(out_path)
     logging.info(f"Excel written to {out_path}")
+
 
     return out_path
