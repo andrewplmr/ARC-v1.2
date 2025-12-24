@@ -7,24 +7,25 @@ cfg = load_config()
 
 FX_RATES = {"GBP": 1.0, "USD": 0.79, "EUR": 0.86}
 
-def amount_matches(a, b):
-    return a == b
 
 def date_matches(d1, d2, tolerance_days=0):
     if pd.isna(d1) or pd.isna(d2):
         return False
     return abs((d1 - d2).days) <= tolerance_days
 
+
 def reference_matches(r1, r2):
     if not r1 or not r2:
         return False
     return r1 == r2
+
 
 def normalise_reference(x):
     if pd.isna(x):
         return ""
     s = str(x).lower()
     return "".join(ch for ch in s if ch.isalnum())
+
 
 def classify_match(amount_ok, date_ok, ref_ok):
     if amount_ok and date_ok and ref_ok:
@@ -41,35 +42,51 @@ def classify_match(amount_ok, date_ok, ref_ok):
 
     return "Unmatched", "Exception – Amount/Ref"
 
-def prepare_dataframe(df):
+
+def prepare_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # Dates
+    # -------------------------
+    # Dates (FIXED)
+    # -------------------------
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    else:
+        df["date"] = pd.NaT
 
+    df["date_missing"] = df["date"].isna()
+
+    # -------------------------
     # Amounts
+    # -------------------------
     if "amount" in df.columns:
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
     else:
         df["amount"] = 0.0
 
-    # Debit / Credit detection (NEW)
+    # Debit / Credit detection
     if df["amount"].mean() < 0:
         df["polarity"] = "debit"
         df["amount"] = df["amount"].abs()
     else:
         df["polarity"] = "credit"
 
-    # Currency conversion (NEW)
+    # -------------------------
+    # Currency
+    # -------------------------
     if "currency" not in df.columns:
         df["currency"] = "GBP"
+
     df["amount_gbp"] = df.apply(
-        lambda r: r["amount"] * FX_RATES.get(r["currency"], 1.0), axis=1
+        lambda r: r["amount"] * FX_RATES.get(r["currency"], 1.0),
+        axis=1
     )
 
     df["amount_cent"] = (df["amount_gbp"] * 100).round().astype(int)
 
+    # -------------------------
+    # References
+    # -------------------------
     if "reference" not in df.columns:
         df["reference"] = ""
 
@@ -77,13 +94,6 @@ def prepare_dataframe(df):
 
     return df
 
-def make_match_key(df):
-    df["match_key"] = (
-        df["amount_cent"].astype(str) + "_" +
-        df["ref_norm"] + "_" +
-        df["date"].astype(str)
-    )
-    return df
 
 def apply_matching(bank_df, ledger_df, gateway_df):
     bank_df = bank_df.copy(); bank_df["source"] = "Bank"
@@ -93,10 +103,12 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     master = pd.concat([bank_df, ledger_df, gateway_df], ignore_index=True)
     master = prepare_dataframe(master)
 
-    # Preserve original index for correct self-join handling
+    # Preserve original index
     master["_idx"] = master.index
 
-    # --- Self-join on amount to find candidate matches ---
+    # -------------------------
+    # Self-join on amount
+    # -------------------------
     candidates = master.merge(
         master,
         on="amount_cent",
@@ -106,12 +118,14 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     # Remove self matches
     candidates = candidates[candidates["_idx"] != candidates["_idx_other"]]
 
-    # Only cross-source comparisons
+    # Cross-source only
     candidates = candidates[candidates["source"] != candidates["source_other"]]
 
-    # Classify matches
+    # -------------------------
+    # Classify
+    # -------------------------
     def row_reason(row):
-        amount_ok = True  # Same amount_cent by construction
+        amount_ok = True
         date_ok = date_matches(row["date"], row["date_other"])
         ref_ok = reference_matches(row["ref_norm"], row["ref_norm_other"])
         return classify_match(amount_ok, date_ok, ref_ok)
@@ -123,7 +137,7 @@ def apply_matching(bank_df, ledger_df, gateway_df):
 
     candidates = pd.concat([candidates, classified], axis=1)
 
-    # Best result per row (prefer strongest match)
+    # Priority
     priority = {
         "Matched": 3,
         "Partially Matched": 2,
@@ -131,18 +145,15 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     }
     candidates["priority"] = candidates["final_status"].map(priority)
 
-    # Group by original transaction index (_idx)
     best = (
         candidates.sort_values("priority", ascending=False)
         .groupby("_idx")
         .first()
     )
 
-    # Assign best match back to master
     master.loc[best.index, "final_status"] = best["final_status"]
     master.loc[best.index, "reason"] = best["reason"]
 
-    # Fill unmatched
     master["final_status"].fillna("Unmatched", inplace=True)
     master["reason"].fillna("Exception – No Match Found", inplace=True)
 
@@ -150,6 +161,5 @@ def apply_matching(bank_df, ledger_df, gateway_df):
         master,
         master[master["final_status"] == "Matched"],
         master[master["final_status"] == "Partially Matched"],
-        master[master["final_status"] == "Unmatched"]
+        master[master["final_status"] == "Unmatched"],
     )
-
