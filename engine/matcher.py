@@ -1,6 +1,5 @@
 import pandas as pd
 import logging
-from engine.fuzzy import mark_fuzzy
 from engine.utils import load_config
 
 cfg = load_config()
@@ -44,9 +43,9 @@ def classify_match(amount_ok, date_ok, ref_ok):
 def prepare_dataframe(df):
     df = df.copy()
 
-    # Dates
+    # Keep dates as pandas Timestamp
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
     # Amounts
     if "amount" in df.columns:
@@ -93,6 +92,9 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     master = pd.concat([bank_df, ledger_df, gateway_df], ignore_index=True)
     master = prepare_dataframe(master)
 
+    # Preserve original index
+    master["_idx"] = master.index
+
     # --- Self-join on amount to find candidate matches ---
     candidates = master.merge(
         master,
@@ -101,16 +103,16 @@ def apply_matching(bank_df, ledger_df, gateway_df):
     )
 
     # Remove self matches
-    candidates = candidates[candidates.index != candidates.index_other]
+    candidates = candidates[candidates["_idx"] != candidates["_idx_other"]]
 
     # Only cross-source comparisons
     candidates = candidates[candidates["source"] != candidates["source_other"]]
 
+    # Classify matches
     def row_reason(row):
         amount_ok = True  # Same amount_cent by construction
         date_ok = date_matches(row["date"], row["date_other"])
         ref_ok = reference_matches(row["ref_norm"], row["ref_norm_other"])
-
         return classify_match(amount_ok, date_ok, ref_ok)
 
     classified = candidates.apply(
@@ -126,25 +128,22 @@ def apply_matching(bank_df, ledger_df, gateway_df):
         "Partially Matched": 2,
         "Unmatched": 1
     }
-
     candidates["priority"] = candidates["final_status"].map(priority)
 
+    # Group by original transaction index
     best = (
         candidates.sort_values("priority", ascending=False)
-        .groupby(candidates.index)
+        .groupby("_idx")
         .first()
     )
 
-    master["final_status"] = best["final_status"]
-    master["reason"] = best["reason"]
+    # Assign back to master
+    master.loc[best.index, "final_status"] = best["final_status"]
+    master.loc[best.index, "reason"] = best["reason"]
 
+    # Fill unmatched
     master["final_status"].fillna("Unmatched", inplace=True)
-    master["reason"] = master["final_status"].map({
-        "Matched": "Exact Date/Amount/Ref Match",
-        "FuzzyMatched": "Partial Ref / Date / Amount Match",
-        "Unmatched": "Exception – No Match Found",
-    })
-
+    master["reason"].fillna("Exception – No Match Found", inplace=True)
 
     return (
         master,
